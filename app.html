@@ -192,6 +192,11 @@ audio{width:100%;margin-top:10px}
   <div class="row" style="margin-top:8px;gap:6px">
     <select id="voiceSel" style="flex:1;font-size:13px;padding:8px 10px"></select>
     <button class="btn ghost sm" id="voiceTest">Nghe thử</button>
+    <select id="modelSel" style="flex:1;font-size:13px;padding:8px 10px">
+      <option value="gemini-2.5-flash-lite">Nhanh nhất</option>
+      <option value="gemini-2.5-flash">Cân bằng</option>
+      <option value="gemini-3.7-flash">Chất lượng cao, chậm</option>
+    </select>
   </div>
 </div>
 
@@ -290,10 +295,11 @@ audio{width:100%;margin-top:10px}
    Dán URL /exec của Apps Script để lưu lên Google Sheet và dùng API key riêng. */
 const CFG = {
   GEMINI_KEY: "",        /* dán key ngay trong app, không cần sửa file */
-  MODEL: "gemini-3.7-flash",
+  MODEL: "gemini-2.5-flash-lite",
   BACKEND: "", TOKEN: ""
 };
 try{ CFG.GEMINI_KEY = localStorage.getItem('es_key') || ""; }catch(e){}
+try{ CFG.MODEL = localStorage.getItem('es_model') || CFG.MODEL; }catch(e){}
 function saveKey(k){
   CFG.GEMINI_KEY = (k||'').trim();
   try{ localStorage.setItem('es_key', CFG.GEMINI_KEY) }catch(e){}
@@ -345,19 +351,19 @@ async function gemini(system,user,model){
   const url="https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent?key="+encodeURIComponent(CFG.GEMINI_KEY);
   const mk=()=>{
     const b={systemInstruction:{parts:[{text:system}]},contents:[{role:"user",parts:[{text:user}]}],
-      generationConfig:{temperature:0.9,maxOutputTokens:2048,responseMimeType:"application/json"}};
+      generationConfig:{temperature:0.9,maxOutputTokens:1600,responseMimeType:"application/json"}};
     if(THINK_OK) b.generationConfig.thinkingConfig={thinkingBudget:0};
     return b;
   };
   const send=async body=>{
     const ac=new AbortController();
-    const to=setTimeout(()=>ac.abort(),45000);
+    const to=setTimeout(()=>ac.abort(),60000);
     try{ return await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:ac.signal}); }
     finally{ clearTimeout(to); }
   };
   let r;
   try{ r=await send(mk()); }
-  catch(e){ throw new Error("Quá 45 giây không có phản hồi. Mạng chậm hoặc Google đang tải nặng."); }
+  catch(e){ throw new Error("TIMEOUT"); }
   if(r.status===400 && THINK_OK){
     THINK_OK=false; try{localStorage.setItem('es_think','0')}catch(e){}
     r=await send(mk());
@@ -374,7 +380,12 @@ async function raw(system,user){
   if(CFG.GEMINI_KEY){
     try{ return await gemini(system,user,CFG.MODEL); }
     catch(e){
-      if(/not found|not supported|models\//i.test(e.message)) return await gemini(system,user,"gemini-2.5-flash");
+      const msg=e.message||"";
+      /* quá giờ hoặc model không tồn tại thì lùi về bản nhẹ nhất */
+      if((msg==="TIMEOUT"||/not found|not supported|models\//i.test(msg)) && CFG.MODEL!=="gemini-2.5-flash-lite"){
+        return await gemini(system,user,"gemini-2.5-flash-lite");
+      }
+      if(msg==="TIMEOUT") throw new Error("Quá 60 giây không có phản hồi. Mạng chậm hoặc Google đang tải nặng — thử lại sau một phút.");
       throw e;
     }
   }
@@ -1394,6 +1405,11 @@ function renderBook(){
 }
 
 keyBar();
+(function(){
+  const m=el('modelSel'); if(!m) return;
+  m.value=CFG.MODEL;
+  m.onchange=()=>{CFG.MODEL=m.value; try{localStorage.setItem('es_model',m.value)}catch(e){}};
+})();
 boot();
 </script>
 </body>
